@@ -13,8 +13,9 @@ app.use(cors({
     'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
     'https://games-frontend.vercel.app'
   ],
-  methods: ['GET', 'POST'],
-  credentials: true
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Create HTTP server
@@ -29,19 +30,23 @@ const io = new Server(server, {
       'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
       'https://games-frontend.vercel.app'
     ],
-    methods: ["GET", "POST"],
-    credentials: true
+    methods: ["GET", "POST", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
   },
+  allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  path: '/socket.io/',
+  cookie: false
 });
 
 // Add error handling for the server
 server.on('error', (error) => {
   console.error('Server error:', error);
   if (error.code === 'EADDRINUSE') {
-    console.log('Port 3001 is already in use. Please free up the port or use a different one.');
+    console.log('Port is already in use. Please free up the port or use a different one.');
   }
 });
 
@@ -573,5 +578,9 @@ server.listen(PORT, '0.0.0.0', () => {
 
 // Add a health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).json({ 
+    status: 'ok',
+    websocket: true,
+    timestamp: new Date().toISOString()
+  });
 }); 
