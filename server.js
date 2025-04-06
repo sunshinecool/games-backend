@@ -12,7 +12,8 @@ app.use(cors({
     'https://games-frontend-sunshinecools-projects.vercel.app',
     'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
     'https://games-frontend.vercel.app',
-    'https://games-frontend-nine.vercel.app'
+    'https://games-frontend-nine.vercel.app',
+    'https://games-frontend-lki4qmv48-sunshinecools-projects.vercel.app'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
@@ -30,7 +31,8 @@ const io = new Server(server, {
       'https://games-frontend-sunshinecools-projects.vercel.app',
       'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
       'https://games-frontend.vercel.app',
-      'https://games-frontend-nine.vercel.app'
+      'https://games-frontend-nine.vercel.app',
+      'https://games-frontend-lki4qmv48-sunshinecools-projects.vercel.app'
     ],
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
@@ -40,7 +42,7 @@ const io = new Server(server, {
   allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ['websocket', 'polling'],
+  transports: ['polling', 'websocket'], // Try polling first, then upgrade to WebSocket
   connectTimeout: 45000,
   maxHttpBufferSize: 1e8
 });
