@@ -18,9 +18,8 @@ const server = http.createServer(app);
 // Create Socket.io server
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'http://192.168.18.27:3000'],
-    methods: ['GET', 'POST'],
-    credentials: true
+    origin: "*",
+    methods: ["GET", "POST"]
   },
   pingTimeout: 60000,
   pingInterval: 25000,
@@ -554,10 +553,14 @@ io.on('connection', (socket) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Server is accessible at:`);
   console.log(`- Local: http://localhost:${PORT}`);
-  console.log(`- Network: http://192.168.18.27:${PORT}`);
+});
+
+// Add a health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
 }); 
