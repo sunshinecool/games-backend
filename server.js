@@ -1,40 +1,43 @@
 const express = require('express');
-const { createServer } = require('http');
+const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
+// Create Express app
 const app = express();
-const httpServer = createServer(app);
-
-// CORS configuration
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://192.168.18.27:3000',
-  process.env.FRONTEND_URL // Will be set in production
-].filter(Boolean); // Remove undefined values
-
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
+  origin: ['http://localhost:3000', 'http://192.168.18.27:3000'],
   methods: ['GET', 'POST'],
   credentials: true
 }));
 
-const io = new Server(httpServer, {
+// Create HTTP server
+const server = http.createServer(app);
+
+// Create Socket.io server
+const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: ['http://localhost:3000', 'http://192.168.18.27:3000'],
     methods: ['GET', 'POST'],
     credentials: true
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling']
+});
+
+// Add error handling for the server
+server.on('error', (error) => {
+  console.error('Server error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.log('Port 3001 is already in use. Please free up the port or use a different one.');
   }
+});
+
+// Add error handling for Socket.io
+io.on('error', (error) => {
+  console.error('Socket.io error:', error);
 });
 
 // Game state
@@ -94,7 +97,6 @@ const createGame = (roomId) => {
   const game = {
     id: roomId,
     players: [],
-    waitingPlayers: [],
     dealer: { cards: [], score: 0 },
     deck: createDeck(),
     gamePhase: 'waiting', // waiting, betting, playing, dealerTurn, gameOver
@@ -175,8 +177,14 @@ const determineWinners = (game) => {
   
   console.log(`Determining winners. Dealer score: ${dealerScore}${dealerBust ? ' (BUST)' : ''}`);
   
-  let winners = [];
   for (const player of game.players) {
+    // Skip players who have already busted
+    if (player.status === 'bust') {
+      console.log(`${player.name} already busted. No further action needed.`);
+      continue;
+    }
+    
+    // Only process players who are still in the game
     if (player.status === 'playing' || player.status === 'stand') {
       const playerScore = player.score;
       const playerBust = playerScore > 21;
@@ -190,12 +198,10 @@ const determineWinners = (game) => {
       } else if (dealerBust) {
         player.status = 'win';
         player.chips += player.bet;
-        winners.push(player.name);
         console.log(`${player.name} wins ${player.bet} chips. Remaining chips: ${player.chips}`);
       } else if (playerScore > dealerScore) {
         player.status = 'win';
         player.chips += player.bet;
-        winners.push(player.name);
         console.log(`${player.name} wins ${player.bet} chips. Remaining chips: ${player.chips}`);
       } else if (playerScore < dealerScore) {
         player.status = 'lose';
@@ -203,57 +209,40 @@ const determineWinners = (game) => {
         console.log(`${player.name} loses ${player.bet} chips. Remaining chips: ${player.chips}`);
       } else {
         player.status = 'push';
-        winners.push(player.name);
+        // Return bet to player (no change in chips)
         console.log(`${player.name} pushes. Bet returned. Chips: ${player.chips}`);
       }
     }
   }
   
   game.gamePhase = 'gameOver';
-  game.winners = winners;
-  game.resetTimer = 15;
-  game.message = winners.length > 0 
-    ? `Congratulations ${winners.join(', ')}! 🎉`
-    : 'Game over! Better luck next time!';
-
-  // Broadcast the game over state
-  io.to(game.id).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
-
-  // Start the reset timer
-  game.resetTimerId = setInterval(() => {
-    game.resetTimer--;
-    io.to(game.id).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
-    
-    if (game.resetTimer <= 0) {
-      clearInterval(game.resetTimerId);
-      if (game.gamePhase === 'gameOver') {
-        console.log('Game auto-resetting after 15 second timeout');
-        resetGame(game);
-        io.to(game.id).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
-      }
-    }
-  }, 1000);
+  game.message = 'Game over!';
+  
+  // Broadcast the game over state with updated chips
+  io.to(game.id).emit('gameStateUpdate', { gameState: game });
+  
+  // Auto-reset the game after 5 seconds
+  setTimeout(() => {
+    resetGame(game);
+    io.to(game.id).emit('gameStateUpdate', { gameState: game });
+    console.log(`Game ${game.id} auto-reset after game over`);
+  }, 5000);
+  
+  return game;
 };
 
 const resetGame = (game) => {
   console.log(`Resetting game ${game.id}`);
   
-  // Move waiting players to active players
-  game.players = [
-    ...game.players.map(player => ({
-      ...player,
-      cards: [],
-      score: 0,
-      bet: 0,
-      status: 'waiting',
-      isCurrentPlayer: false
-    })),
-    ...game.waitingPlayers.map(player => ({
-      ...player,
-      status: 'waiting'
-    }))
-  ];
-  game.waitingPlayers = [];
+  // Preserve player chips but reset everything else
+  game.players = game.players.map(player => ({
+    ...player,
+    cards: [],
+    score: 0,
+    bet: 0,
+    status: 'waiting',
+    isCurrentPlayer: false
+  }));
   
   game.dealer = { cards: [], score: 0 };
   game.deck = createDeck();
@@ -266,51 +255,6 @@ const resetGame = (game) => {
   console.log(`Game ${game.id} reset complete. Players: ${game.players.map(p => `${p.name} (${p.chips} chips)`).join(', ')}`);
   
   return game;
-};
-
-// Add this function before the Socket.io event handlers
-const sanitizeGameState = (game) => {
-  return {
-    id: game.id,
-    players: game.players.map(player => ({
-      id: player.id,
-      name: player.name,
-      chips: player.chips,
-      cards: player.cards,
-      score: player.score,
-      bet: player.bet,
-      status: player.status,
-      isCurrentPlayer: game.currentPlayer === player.id
-    })),
-    waitingPlayers: game.waitingPlayers.map(player => ({
-      id: player.id,
-      name: player.name,
-      chips: player.chips,
-      status: player.status
-    })),
-    dealer: {
-      cards: game.dealer.cards,
-      score: game.dealer.score
-    },
-    gamePhase: game.gamePhase,
-    pot: game.pot,
-    currentBet: game.currentBet,
-    message: game.message,
-    winners: game.winners,
-    resetTimer: game.resetTimer,
-    currentPlayer: game.currentPlayer
-  };
-};
-
-// Add this function before the Socket.io event handlers
-const findGameByPlayerId = (playerId) => {
-  for (const gameId in games) {
-    const game = games[gameId];
-    if (game.players.some(p => p.id === playerId)) {
-      return game;
-    }
-  }
-  return null;
 };
 
 // Socket.io event handlers
@@ -328,49 +272,14 @@ io.on('connection', (socket) => {
   
   // Join a game room
   socket.on('joinGame', ({ playerName, roomId }) => {
-    const game = getGame('room1'); // Always use room1
-    const existingPlayer = game.players.find(p => p.name === playerName);
-    const waitingPlayer = game.waitingPlayers.find(p => p.name === playerName);
+    // Generate a room ID if not provided
+    const gameId = roomId || uuidv4();
     
-    if (existingPlayer) {
-      // Reconnecting player
-      existingPlayer.id = socket.id;
-      socket.join('room1');
-      socket.emit('playerJoined', { 
-        player: existingPlayer,
-        gameState: sanitizeGameState(game)
-      });
-      io.to('room1').emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
-      return;
-    }
-
-    if (waitingPlayer) {
-      // Move from waiting to active if game is in waiting phase
-      if (game.gamePhase === 'waiting') {
-        waitingPlayer.id = socket.id;
-        game.players.push(waitingPlayer);
-        game.waitingPlayers = game.waitingPlayers.filter(p => p.name !== playerName);
-        socket.join('room1');
-        socket.emit('playerJoined', {
-          player: waitingPlayer,
-          gameState: sanitizeGameState(game)
-        });
-        io.to('room1').emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
-      } else {
-        // Update socket ID for waiting player
-        waitingPlayer.id = socket.id;
-        socket.join('room1');
-        socket.emit('playerJoined', {
-          player: waitingPlayer,
-          gameState: sanitizeGameState(game),
-          isWaiting: true
-        });
-      }
-      return;
-    }
-
-    // New player
-    const newPlayer = {
+    // Get or create the game
+    const game = getGame(gameId);
+    
+    // Create player
+    const player = {
       id: socket.id,
       name: playerName,
       chips: 1000,
@@ -380,33 +289,45 @@ io.on('connection', (socket) => {
       status: 'waiting',
       isCurrentPlayer: false
     };
-
-    if (game.gamePhase === 'waiting') {
-      game.players.push(newPlayer);
-    } else {
-      game.waitingPlayers.push(newPlayer);
-      socket.emit('playerJoined', {
-        player: newPlayer,
-        gameState: sanitizeGameState(game),
-        isWaiting: true
-      });
-      return;
-    }
-
-    socket.join('room1');
-    socket.emit('playerJoined', {
-      player: newPlayer,
-      gameState: sanitizeGameState(game)
+    
+    // Add player to game
+    game.players.push(player);
+    
+    // Join the socket room
+    socket.join(gameId);
+    
+    // Notify the player they joined
+    socket.emit('playerJoined', { 
+      player,
+      gameState: game
     });
-    io.to('room1').emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+    
+    // Notify other players
+    socket.to(gameId).emit('playerJoined', { 
+      player: { ...player, isCurrentPlayer: false },
+      gameState: game
+    });
+    
+    // If this is the first player, make them the dealer
+    if (game.players.length === 1) {
+      player.isDealer = true;
+      game.message = `${playerName} joined as dealer. Waiting for more players...`;
+    } else {
+      game.message = `${playerName} joined the game.`;
+    }
+    
+    // Broadcast updated game state
+    io.to(gameId).emit('gameStateUpdate', { gameState: game });
   });
   
   // Player ready to start
   socket.on('playerReady', ({ roomId }) => {
+    console.log(`Player ready event received from ${socket.id} for room ${roomId}`);
     const game = getGame(roomId);
     const player = game.players.find(p => p.id === socket.id);
     
     if (player) {
+      console.log(`Player ${player.name} (${player.id}) is ready to play`);
       player.status = 'ready';
       game.message = `${player.name} is ready to play.`;
       
@@ -425,7 +346,9 @@ io.on('connection', (socket) => {
       }
       
       // Broadcast updated game state
-      io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+      io.to(roomId).emit('gameStateUpdate', { gameState: game });
+    } else {
+      console.error(`Player ${socket.id} not found in game ${roomId}`);
     }
   });
   
@@ -433,6 +356,9 @@ io.on('connection', (socket) => {
   socket.on('placeBet', ({ amount, roomId }) => {
     const game = getGame(roomId);
     const player = game.players.find(p => p.id === socket.id);
+    
+    console.log(`Place bet request - Room: ${roomId}, Player: ${socket.id}, Amount: ${amount}`);
+    console.log(`Current game state - Phase: ${game.gamePhase}, Player chips: ${player?.chips}`);
     
     if (player && game.gamePhase === 'betting') {
       if (amount > 0 && amount <= player.chips) {
@@ -442,8 +368,11 @@ io.on('connection', (socket) => {
         player.status = 'betPlaced';
         game.message = `${player.name} placed a bet of ${amount}.`;
         
+        console.log(`Bet placed successfully - Player: ${player.name}, New chips: ${player.chips}, Bet: ${player.bet}`);
+        
         // Check if all players have placed bets
         const allBetsPlaced = game.players.every(p => p.status === 'betPlaced');
+        console.log(`All bets placed: ${allBetsPlaced}`);
         
         if (allBetsPlaced) {
           // Deal initial cards
@@ -461,7 +390,7 @@ io.on('connection', (socket) => {
         }
         
         // Broadcast updated game state
-        io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+        io.to(roomId).emit('gameStateUpdate', { gameState: game });
       }
     }
   });
@@ -489,7 +418,7 @@ io.on('connection', (socket) => {
       }
       
       // Broadcast updated game state
-      io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+      io.to(roomId).emit('gameStateUpdate', { gameState: game });
     }
   });
   
@@ -506,7 +435,7 @@ io.on('connection', (socket) => {
       moveToNextPlayer(game);
       
       // Broadcast updated game state
-      io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+      io.to(roomId).emit('gameStateUpdate', { gameState: game });
     }
   });
   
@@ -539,7 +468,7 @@ io.on('connection', (socket) => {
         moveToNextPlayer(game);
         
         // Broadcast updated game state
-        io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+        io.to(roomId).emit('gameStateUpdate', { gameState: game });
       }
     }
   });
@@ -563,7 +492,7 @@ io.on('connection', (socket) => {
       if (nextIndex === currentIndex) {
         console.log(`All players have completed their turns. Moving to dealer's turn.`);
         dealerPlay(game);
-        io.to(game.id).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+        io.to(game.id).emit('gameStateUpdate', { gameState: game });
         return;
       }
     }
@@ -592,7 +521,7 @@ io.on('connection', (socket) => {
         socket.to(gameId).emit('playerLeft', { 
           playerId: socket.id,
           playerName: player.name,
-          gameState: sanitizeGameState(game)
+          gameState: game
         });
         
         // If no players left, remove the game
@@ -619,42 +548,16 @@ io.on('connection', (socket) => {
       });
       
       // Force a game state update
-      io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
+      io.to(roomId).emit('gameStateUpdate', { gameState: game });
     }
-  });
-
-  // Next game
-  socket.on('nextGame', ({ roomId }) => {
-    console.log('Next game requested for room:', roomId);
-    const game = getGame(roomId);
-    
-    if (!game) {
-      console.error('Game not found for room:', roomId);
-      socket.emit('error', { message: 'Game not found' });
-      return;
-    }
-
-    if (game.gamePhase !== 'gameOver') {
-      console.error('Cannot start next game - current phase:', game.gamePhase);
-      socket.emit('error', { message: 'Cannot start next game at this time' });
-      return;
-    }
-
-    console.log('Starting next game for room:', roomId);
-    if (game.resetTimerId) {
-      clearInterval(game.resetTimerId);
-    }
-    
-    resetGame(game);
-    io.to(roomId).emit('gameStateUpdate', { gameState: sanitizeGameState(game) });
   });
 });
 
-// Start server
+// Start the server
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
-  console.log('Server is accessible on:');
+  console.log(`Server is accessible at:`);
   console.log(`- Local: http://localhost:${PORT}`);
-  console.log(`- Network: http://0.0.0.0:${PORT}`);
+  console.log(`- Network: http://192.168.18.27:${PORT}`);
 }); 
