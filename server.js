@@ -55,6 +55,28 @@ io.on('error', (error) => {
   console.error('Socket.io error:', error);
 });
 
+// Add connection logging
+io.engine.on('connection_error', (err) => {
+  console.error('Connection error:', {
+    code: err.code,
+    message: err.message,
+    context: err.context,
+    req: {
+      url: err.req.url,
+      headers: err.req.headers,
+      method: err.req.method
+    }
+  });
+});
+
+io.engine.on('initial_headers', (headers, req) => {
+  console.log('Initial headers:', {
+    url: req.url,
+    method: req.method,
+    headers: headers
+  });
+});
+
 // Game state
 const games = {};
 
@@ -569,11 +591,16 @@ io.on('connection', (socket) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Server is accessible at:`);
-  console.log(`- Local: http://localhost:${PORT}`);
+  console.log('=== Server Configuration ===');
+  console.log(`Port: ${PORT} (from env: ${process.env.PORT ? 'yes' : 'no'})`);
+  console.log(`Environment: ${process.env.NODE_ENV}`);
+  console.log(`WebSocket enabled: yes`);
+  console.log(`CORS origins:`, io.opts.cors.origin);
+  console.log(`Socket.IO path: ${io.opts.path}`);
+  console.log(`Socket.IO transports:`, io.opts.transports);
+  console.log('=========================');
 });
 
 // Add a health check endpoint
