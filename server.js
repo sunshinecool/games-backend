@@ -11,7 +11,8 @@ app.use(cors({
     'http://localhost:3000',
     'https://games-frontend-sunshinecools-projects.vercel.app',
     'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
-    'https://games-frontend.vercel.app'
+    'https://games-frontend.vercel.app',
+    'https://games-frontend-nine.vercel.app'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
@@ -28,31 +29,20 @@ const io = new Server(server, {
       'http://localhost:3000',
       'https://games-frontend-sunshinecools-projects.vercel.app',
       'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
-      'https://games-frontend.vercel.app'
+      'https://games-frontend.vercel.app',
+      'https://games-frontend-nine.vercel.app'
     ],
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
   },
+  path: '/socket.io/',
   allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
   transports: ['websocket', 'polling'],
-  path: '/socket.io/',
-  cookie: false
-});
-
-// Add error handling for the server
-server.on('error', (error) => {
-  console.error('Server error:', error);
-  if (error.code === 'EADDRINUSE') {
-    console.log('Port is already in use. Please free up the port or use a different one.');
-  }
-});
-
-// Add error handling for Socket.io
-io.on('error', (error) => {
-  console.error('Socket.io error:', error);
+  connectTimeout: 45000,
+  maxHttpBufferSize: 1e8
 });
 
 // Add connection logging
@@ -75,6 +65,19 @@ io.engine.on('initial_headers', (headers, req) => {
     method: req.method,
     headers: headers
   });
+});
+
+// Add error handling for the server
+server.on('error', (error) => {
+  console.error('Server error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.log('Port is already in use. Please free up the port or use a different one.');
+  }
+});
+
+// Add error handling for Socket.io
+io.on('error', (error) => {
+  console.error('Socket.io error:', error);
 });
 
 // Game state
@@ -591,23 +594,24 @@ io.on('connection', (socket) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('=== Server Configuration ===');
-  console.log(`Port: ${PORT} (from env: ${process.env.PORT ? 'yes' : 'no'})`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`WebSocket enabled: yes`);
-  console.log(`CORS origins:`, io.opts.cors.origin);
-  console.log(`Socket.IO path: ${io.opts.path}`);
-  console.log(`Socket.IO transports:`, io.opts.transports);
-  console.log('=========================');
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is accessible at:`);
+  console.log(`- Local: http://localhost:${PORT}`);
 });
 
-// Add a health check endpoint
+// Add a health check endpoint that includes WebSocket status
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok',
-    websocket: true,
+    websocket: {
+      enabled: true,
+      path: io.path(),
+      transports: io.opts.transports,
+      connections: io.engine.clientsCount,
+      cors: io.opts.cors
+    },
     timestamp: new Date().toISOString()
   });
 }); 
