@@ -7,7 +7,12 @@ const { v4: uuidv4 } = require('uuid');
 // Create Express app
 const app = express();
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://192.168.18.27:3000'],
+  origin: [
+    'http://localhost:3000',
+    'https://games-frontend-sunshinecools-projects.vercel.app',
+    'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
+    'https://games-frontend.vercel.app'
+  ],
   methods: ['GET', 'POST'],
   credentials: true
 }));
@@ -18,8 +23,14 @@ const server = http.createServer(app);
 // Create Socket.io server
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: [
+      'http://localhost:3000',
+      'https://games-frontend-sunshinecools-projects.vercel.app',
+      'https://games-frontend-git-main-sunshinecools-projects.vercel.app',
+      'https://games-frontend.vercel.app'
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
   },
   pingTimeout: 60000,
   pingInterval: 25000,
