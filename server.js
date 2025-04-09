@@ -42,9 +42,13 @@ const io = new Server(server, {
   allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
-  transports: ['polling', 'websocket'], // Try polling first, then upgrade to WebSocket
+  transports: ['polling', 'websocket'],
   connectTimeout: 45000,
-  maxHttpBufferSize: 1e8
+  maxHttpBufferSize: 1e8,
+  allowUpgrades: true,
+  perMessageDeflate: {
+    threshold: 32768
+  }
 });
 
 // Add connection logging
@@ -301,7 +305,25 @@ const resetGame = (game) => {
 
 // Socket.io event handlers
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  console.log('New client connected:', {
+    id: socket.id,
+    transport: socket.conn.transport.name,
+    headers: socket.handshake.headers
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Client disconnected:', {
+      id: socket.id,
+      reason: reason
+    });
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket error:', {
+      id: socket.id,
+      error: error
+    });
+  });
   
   // Reset game
   socket.on('resetGame', ({ roomId }) => {
@@ -543,56 +565,6 @@ io.on('connection', (socket) => {
     game.message = `${game.players[nextIndex].name}'s turn.`;
     console.log(`Next player: ${game.players[nextIndex].name} (${game.players[nextIndex].status})`);
   };
-  
-  // Disconnect
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-    
-    // Find the game this player was in
-    for (const gameId in games) {
-      const game = games[gameId];
-      const playerIndex = game.players.findIndex(p => p.id === socket.id);
-      
-      if (playerIndex !== -1) {
-        const player = game.players[playerIndex];
-        
-        // Remove player from game
-        game.players.splice(playerIndex, 1);
-        
-        // Notify other players
-        socket.to(gameId).emit('playerLeft', { 
-          playerId: socket.id,
-          playerName: player.name,
-          gameState: game
-        });
-        
-        // If no players left, remove the game
-        if (game.players.length === 0) {
-          delete games[gameId];
-        }
-        
-        break;
-      }
-    }
-  });
-  
-  // Debug game state
-  socket.on('debugGameState', ({ roomId }) => {
-    const game = getGame(roomId);
-    if (game) {
-      console.log(`Debug game state for room ${roomId}:`);
-      console.log(`Game phase: ${game.gamePhase}`);
-      console.log(`Current player: ${game.currentPlayer}`);
-      console.log(`Dealer cards: ${game.dealer.cards.map(c => `${c.value}${c.suit}`).join(', ')} (Score: ${game.dealer.score})`);
-      console.log('Players:');
-      game.players.forEach(player => {
-        console.log(`- ${player.name} (${player.id}): Status=${player.status}, Score=${player.score}, Bet=${player.bet}, Cards=${player.cards.map(c => `${c.value}${c.suit}`).join(', ')}`);
-      });
-      
-      // Force a game state update
-      io.to(roomId).emit('gameStateUpdate', { gameState: game });
-    }
-  });
 });
 
 // Start the server
