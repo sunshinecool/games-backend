@@ -1,3 +1,5 @@
+// Server configuration for Blackjack game with WebSocket support
+// Last updated: April 2024
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
